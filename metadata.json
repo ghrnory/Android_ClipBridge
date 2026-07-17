@@ -1,0 +1,6 @@
+{
+  "name": "Clipboard Sync",
+  "description": "Real-time secure offline local clipboard synchronization between Android and Windows over Wi-Fi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
