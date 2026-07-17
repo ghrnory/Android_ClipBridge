@@ -93,6 +93,9 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildForegroundNotification("Not Connected", "Waiting to start discovery..."))
+
+        // Start discovery immediately so the service can reconnect even when the UI is not bound.
+        startAutoDiscovery()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -103,6 +106,11 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
                 copyToClipboardLocal(textToCopy)
             }
         }
+
+        if (_connectionState.value == ConnectionState.DISCONNECTED) {
+            startAutoDiscovery()
+        }
+
         return START_STICKY
     }
 
