@@ -78,6 +78,7 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
 
     // Track last synced text to prevent feedback loops
     private var lastSyncedText: String? = null
+    private var bubbleManager: FloatingBubbleManager? = null
 
     inner class LocalBinder : Binder() {
         fun getService(): ClipboardSyncService = this@ClipboardSyncService
@@ -93,6 +94,9 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildForegroundNotification("Not Connected", "Waiting to start discovery..."))
+        
+        bubbleManager = FloatingBubbleManager(this, this)
+        updateFloatingBubbleState()
 
         // Start discovery immediately so the service can reconnect even when the UI is not bound.
         startAutoDiscovery()
@@ -166,6 +170,11 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
         } else {
             Toast.makeText(this, "Local clipboard is empty", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun syncText(text: String) {
+        Log.d(TAG, "syncText from transparent activity: $text")
+        onLocalClipboardChanged(text)
     }
 
     private fun copyToClipboardLocal(text: String) {
@@ -360,6 +369,16 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
             PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE)
         }
 
+        val syncIntent = Intent(this, com.example.ui.QuickSyncActivity::class.java).apply {
+            action = com.example.ui.QuickSyncActivity.ACTION_SYNC_TO_PC
+        }
+        val syncPendingIntent = PendingIntent.getActivity(
+            this,
+            2,
+            syncIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
@@ -367,6 +386,7 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
+            .addAction(android.R.drawable.ic_popup_sync, "مزامنة حافظة الهاتف", syncPendingIntent)
             .build()
     }
 
@@ -380,11 +400,11 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
         val truncatedText = if (text.length > 50) text.take(47) + "..." else text
 
         // Action to copy the text directly from the notification
-        val copyIntent = Intent(this, ClipboardSyncService::class.java).apply {
-            action = ACTION_COPY
-            putExtra(EXTRA_TEXT, text)
+        val copyIntent = Intent(this, com.example.ui.QuickSyncActivity::class.java).apply {
+            action = com.example.ui.QuickSyncActivity.ACTION_COPY_TO_PHONE
+            putExtra(com.example.ui.QuickSyncActivity.EXTRA_TEXT, text)
         }
-        val copyPendingIntent = PendingIntent.getService(
+        val copyPendingIntent = PendingIntent.getActivity(
             this,
             1,
             copyIntent,
@@ -395,14 +415,14 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
         val mainPendingIntent = PendingIntent.getActivity(this, 0, mainIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("New Clipboard Text Received")
+            .setContentTitle("تم استلام نص من الكمبيوتر")
             .setContentText(truncatedText)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(mainPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .addAction(android.R.drawable.ic_menu_save, "Copy to Clipboard", copyPendingIntent)
+            .addAction(android.R.drawable.ic_menu_save, "نسخ إلى الهاتف", copyPendingIntent)
             .setAutoCancel(true)
             .build()
 
@@ -416,9 +436,27 @@ class ClipboardSyncService : Service(), ClipboardSocketClient.Callback {
         manager?.cancel(NOTIFICATION_ID + 1)
     }
 
+    fun updateFloatingBubbleState() {
+        val prefs = getSharedPreferences("clipboard_prefs", Context.MODE_PRIVATE)
+        val isEnabled = prefs.getBoolean("pref_floating_bubble_enabled", false)
+        
+        if (isEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+            serviceScope.launch {
+                bubbleManager?.showBubble()
+            }
+        } else {
+            bubbleManager?.dismissBubble()
+        }
+    }
+
+    fun onFloatingBubbleSettingsChanged() {
+        updateFloatingBubbleState()
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service onDestroy")
+        bubbleManager?.dismissBubble()
         clipboardManager?.removePrimaryClipChangedListener(clipListener)
         stopConnection()
         serviceJob.cancel()

@@ -25,7 +25,9 @@ data class UiState(
     val serverName: String? = null,
     val serverIp: String? = null,
     val history: List<ClipboardItem> = emptyList(),
-    val isServiceBound: Boolean = false
+    val isServiceBound: Boolean = false,
+    val isIgnoringBatteryOptimizations: Boolean = true,
+    val isFloatingBubbleEnabled: Boolean = false
 )
 
 class ClipboardViewModel(application: Application) : AndroidViewModel(application), ServiceConnection {
@@ -44,20 +46,34 @@ class ClipboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val _serverName = MutableStateFlow<String?>(null)
     private val _serverIp = MutableStateFlow<String?>(null)
     private val _clipboardHistory = MutableStateFlow<List<ClipboardItem>>(emptyList())
+    private val _isIgnoringBatteryOptimizations = MutableStateFlow(true)
+    private val _isFloatingBubbleEnabled = MutableStateFlow(false)
+    private val prefs = context.getSharedPreferences("clipboard_prefs", Context.MODE_PRIVATE)
 
     val uiState: StateFlow<UiState> = combine(
-        _serviceConnectionState,
-        _serverName,
-        _serverIp,
-        _clipboardHistory,
-        _isServiceBound
-    ) { state, name, ip, history, bound ->
+        combine(
+            _serviceConnectionState,
+            _serverName,
+            _serverIp,
+            _clipboardHistory,
+            _isServiceBound
+        ) { state, name, ip, history, bound ->
+            Triple(state, name, ip) to Pair(history, bound)
+        },
+        _isIgnoringBatteryOptimizations,
+        _isFloatingBubbleEnabled
+    ) { combined5, ignoreBattery, isBubbleEnabled ->
+        val (triple, pair) = combined5
+        val (state, name, ip) = triple
+        val (history, bound) = pair
         UiState(
             connectionState = state,
             serverName = name,
             serverIp = ip,
             history = history,
-            isServiceBound = bound
+            isServiceBound = bound,
+            isIgnoringBatteryOptimizations = ignoreBattery,
+            isFloatingBubbleEnabled = isBubbleEnabled
         )
     }.stateIn(
         scope = viewModelScope,
@@ -66,7 +82,32 @@ class ClipboardViewModel(application: Application) : AndroidViewModel(applicatio
     )
 
     init {
+        _isFloatingBubbleEnabled.value = prefs.getBoolean("pref_floating_bubble_enabled", false)
         startAndBindService()
+        checkBatteryOptimizations()
+    }
+
+    fun checkBatteryOptimizations() {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+        if (powerManager != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            _isIgnoringBatteryOptimizations.value = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+        } else {
+            _isIgnoringBatteryOptimizations.value = true
+        }
+    }
+
+    fun requestIgnoreBatteryOptimizations() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to request ignore battery optimizations", e)
+            }
+        }
     }
 
     fun startAndBindService() {
@@ -95,6 +136,9 @@ class ClipboardViewModel(application: Application) : AndroidViewModel(applicatio
             val serviceInstance = binder.getService()
             boundService = serviceInstance
             _isServiceBound.value = true
+
+            // Synchronize floating bubble state immediately on bind
+            serviceInstance.updateFloatingBubbleState()
 
             // Gather values and observe flows from Service
             viewModelScope.launch {
@@ -152,6 +196,43 @@ class ClipboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun clearHistory() {
         boundService?.clearHistory()
+    }
+
+    fun hasOverlayPermission(): Boolean {
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            android.provider.Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+    }
+
+    fun toggleFloatingBubble(enabled: Boolean) {
+        prefs.edit().putBoolean("pref_floating_bubble_enabled", enabled).apply()
+        _isFloatingBubbleEnabled.value = enabled
+        boundService?.onFloatingBubbleSettingsChanged()
+    }
+
+    fun requestOverlayPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:${context.packageName}")
+                ).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(intent)
+                } catch (e2: Exception) {
+                    Log.e(TAG, "Failed to request overlay permission", e2)
+                }
+            }
+        }
     }
 
     override fun onCleared() {

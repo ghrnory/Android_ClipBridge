@@ -42,5 +42,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // Automatically sync current clipboard when user opens the app (great for Android 10+ clipboard restrictions)
         viewModel.manualSyncCurrentClipboard()
+        // Refresh battery optimization status
+        viewModel.checkBatteryOptimizations()
     }
 }

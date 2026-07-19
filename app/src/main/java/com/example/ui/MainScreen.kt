@@ -19,6 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -171,6 +172,36 @@ fun MainScreen(
             // 3. Informational Alert Banner (Android background privacy limitations explanation)
             item {
                 InfoPrivacyCard()
+            }
+
+            // 3.5 Battery Optimization Alert Card (if not ignoring battery optimizations)
+            if (!uiState.isIgnoringBatteryOptimizations) {
+                item {
+                    BatteryOptimizationCard(
+                        onRequestIgnore = { viewModel.requestIgnoreBatteryOptimizations() }
+                    )
+                }
+            }
+
+            // 3.6 Floating Sync Bubble Card
+            item {
+                var hasOverlayPermission by remember { mutableStateOf(viewModel.hasOverlayPermission()) }
+                
+                // Refresh permission check state when floating bubble is turned on or off
+                LaunchedEffect(uiState.isFloatingBubbleEnabled) {
+                    hasOverlayPermission = viewModel.hasOverlayPermission()
+                }
+
+                FloatingBubbleCard(
+                    isEnabled = uiState.isFloatingBubbleEnabled,
+                    hasPermission = hasOverlayPermission,
+                    onToggle = { checked ->
+                        viewModel.toggleFloatingBubble(checked)
+                    },
+                    onRequestPermission = {
+                        viewModel.requestOverlayPermission()
+                    }
+                )
             }
 
             // 4. Clipboard History List Header
@@ -666,6 +697,144 @@ fun EmptyStateBlock(modifier: Modifier = Modifier) {
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 lineHeight = 18.sp
             )
+        }
+    }
+}
+
+@Composable
+fun BatteryOptimizationCard(onRequestIgnore: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "مزامنة مستقرة في الخلفية",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = "لضمان استمرار المزامنة عندما تكون الشاشة مغلقة أو التطبيق في الخلفية، يرجى استثناء التطبيق من تحسين استهلاك البطارية.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                        lineHeight = 16.sp
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = onRequestIgnore,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.align(Alignment.End),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text("إعدادات استثناء البطارية", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+@Composable
+fun FloatingBubbleCard(
+    isEnabled: Boolean,
+    hasPermission: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onRequestPermission: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.25f)
+        ),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Sync,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "الزر العائم للمزامنة السريعة",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = { checked ->
+                        if (checked && !hasPermission) {
+                            onRequestPermission()
+                        } else {
+                            onToggle(checked)
+                        }
+                    },
+                    modifier = Modifier.scale(0.85f)
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "يظهر زر عائم صغير فوق كل التطبيقات. بمجرد نسخ أي نص، اضغط على الزر ليتم إرساله فوراً إلى الكمبيوتر دون مغادرة تطبيقك الحالي.",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
+                lineHeight = 16.sp
+            )
+            
+            if (isEnabled && !hasPermission) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "⚠️ يتطلب إذن الظهور فوق التطبيقات",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Button(
+                        onClick = onRequestPermission,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Text("منح الإذن", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
     }
 }

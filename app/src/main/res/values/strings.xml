@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Clipboard Sync</string>
+    <string name="copy_to_pc">نسخ إلى الحاسوب</string>
 </resources>
